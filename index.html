@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Collège Saint André 2 - Pointage QR</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; text-align:center; background:#f7fafc; padding:20px; }
+    h2 { color:#1a365d; }
+    .card { max-width:350px; margin:0 auto; background:#fff; padding:15px; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,.1); }
+    input, button { width:100%; box-sizing:border-box; padding:12px; margin:6px 0; font-size:16px; border-radius:6px; border:1px solid #cbd5e0; }
+    button { background:#1a365d; color:#fff; border:none; cursor:pointer; }
+    #result { margin:20px auto 0; font-size:18px; font-weight:bold; padding:15px; border-radius:6px; max-width:400px; }
+    .success { background:#c6f6d5; color:#22543d; border:1px solid #9ae6b4; }
+    .error { background:#fed7d7; color:#742a2a; border:1px solid #feb2b2; }
+    #who { color:#4a5568; font-size:14px; margin-bottom:10px; }
+    #logout { width:auto; background:none; color:#2b6cb0; border:none; text-decoration:underline; padding:4px; font-size:14px; }
+  </style>
+</head>
+<body>
+  <h2>Collège Saint André 2 - Pointage</h2>
+
+  <!-- Connexion opérateur -->
+  <div id="loginBox" class="card">
+    <p>Réservé aux opérateurs autorisés</p>
+    <input id="op" placeholder="Matricule (ex. CSA-ADM-008)" autocapitalize="characters" autocomplete="off">
+    <input id="code" type="password" placeholder="Jeton de sécurité" autocomplete="off">
+    <button id="loginBtn">Se connecter</button>
+    <div id="loginMsg" class="error" style="display:none;margin-top:10px;padding:10px;border-radius:6px;"></div>
+  </div>
+
+  <!-- Scanner -->
+  <div id="scanBox" style="display:none;">
+    <div id="who"></div>
+    <button id="logout">Se déconnecter</button>
+    <div id="reader" class="card"></div>
+    <div id="result">Scannez le QR Code de votre carte de service...</div>
+  </div>
+
+  <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbzjzJzNl0vEVlyDi35S7BDpGXSixhMbWwx2MikyjtO2mWcrudSnL0ieMCiFMFL4xAJR/exec";
+    let operateur = null, code = null, isProcessing = false, scanner = null;
+
+    function post(payload) {
+      return fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
+    }
+
+    function showScanner(nom) {
+      document.getElementById("loginBox").style.display = "none";
+      document.getElementById("scanBox").style.display = "block";
+      document.getElementById("who").textContent = "Opérateur : " + nom;
+      if (!scanner) {
+        scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+        scanner.render(onScanSuccess);
+      }
+    }
+
+    function login(op, c, auto) {
+      const msg = document.getElementById("loginMsg");
+      msg.style.display = "none";
+      post({ action: "login", operateur: op, code: c })
+        .then(res => {
+          if (res.success) {
+            operateur = op; code = c;
+            sessionStorage.setItem("cred", JSON.stringify({ op: op, code: c }));
+            showScanner(res.nom);
+          } else if (!auto) {
+            msg.textContent = res.message; msg.style.display = "block";
+          } else {
+            sessionStorage.removeItem("cred");
+          }
+        })
+        .catch(err => { if (!auto) { msg.textContent = "Erreur réseau : " + err.message; msg.style.display = "block"; } });
+    }
+
+    document.getElementById("loginBtn").onclick = () =>
+      login(document.getElementById("op").value.trim(), document.getElementById("code").value.trim(), false);
+
+    document.getElementById("logout").onclick = () => {
+      sessionStorage.removeItem("cred");
+      location.reload();
+    };
+
+    function onScanSuccess(decodedText) {
+      if (isProcessing) return;
+      isProcessing = true;
+      const resDiv = document.getElementById("result");
+      resDiv.className = "";
+      resDiv.textContent = "Traitement en cours...";
+
+      post({ operateur: operateur, code: code, qrData: decodedText })
+        .then(res => {
+          if (res.success) {
+            resDiv.className = "success";
+            resDiv.textContent = "✓ " + res.type + " enregistrée pour " + res.agent +
+              " à " + res.heure + " (" + (res.retard || res.heuresSupp || "Ok") + ")";
+          } else {
+            resDiv.className = "error";
+            resDiv.textContent = "✕ " + res.message;
+          }
+        })
+        .catch(err => {
+          resDiv.className = "error";
+          resDiv.textContent = "✕ Erreur réseau : " + err.message;
+        })
+        .finally(() => setTimeout(() => { isProcessing = false; }, 3000));
+    }
+
+    const saved = sessionStorage.getItem("cred");
+    if (saved) { const s = JSON.parse(saved); login(s.op, s.code, true); }
+  </script>
+</body>
+</html>
